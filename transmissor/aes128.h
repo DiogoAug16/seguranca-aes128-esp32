@@ -384,4 +384,57 @@ void invMixColumns(uint8_t estado[4][4]) {
   }
 }
 
+
+/* ==========================================================================
+ * CIFRAR E DECIFRAR 1 BLOCO
+ * ========================================================================== */
+
+/* Cifra 1 bloco de 16 bytes usando as chaves de rodada w (ja expandidas). */
+void cifrarBloco(const uint8_t entrada[16], uint8_t saida[16], uint8_t w[NUM_PALAVRAS][4]) {
+  uint8_t estado[4][4];
+  blocoParaEstado(entrada, estado);
+
+  /* Rodada 0: so AddRoundKey com a chave 0 (a propria chave) */
+  addRoundKey(estado, w, 0);
+
+  /* Rodadas 1 a 9: as 4 transformacoes completas */
+  for (int rodada = 1; rodada <= 9; rodada++) {
+    subBytes(estado);
+    shiftRows(estado);
+    mixColumns(estado);
+    addRoundKey(estado, w, rodada);
+  }
+
+  /* Rodada 10 (final): SEM MixColumns */
+  subBytes(estado);
+  shiftRows(estado);
+  addRoundKey(estado, w, 10);
+
+  estadoParaBloco(estado, saida);
+}
+
+/* Decifra 1 bloco: as inversas, na ordem inversa, chaves de 10 ate 0. */
+void decifrarBloco(const uint8_t entrada[16], uint8_t saida[16], uint8_t w[NUM_PALAVRAS][4]) {
+  uint8_t estado[4][4];
+  blocoParaEstado(entrada, estado);
+
+  /* Desfaz a rodada 10 (que nao tinha MixColumns) */
+  addRoundKey(estado, w, 10);
+  invShiftRows(estado);
+  invSubBytes(estado);
+
+  /* Desfaz as rodadas 9 ate 1 */
+  for (int rodada = 9; rodada >= 1; rodada--) {
+    addRoundKey(estado, w, rodada);
+    invMixColumns(estado);
+    invShiftRows(estado);
+    invSubBytes(estado);
+  }
+
+  /* Desfaz a rodada 0 */
+  addRoundKey(estado, w, 0);
+
+  estadoParaBloco(estado, saida);
+}
+
 #endif /* AES128_H */
