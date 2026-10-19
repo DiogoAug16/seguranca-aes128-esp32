@@ -52,7 +52,6 @@ Enviado em bytes brutos (`Serial2.write`), não em texto hexadecimal.
 | `m <texto>`   | cifra e envia uma mensagem nova |
 | `k <n>`       | inverte o bit `n` (0..127) da chave e reenvia (o receptor acusa padding inválido) |
 | `r`           | restaura a chave original |
-| `3`           | registros da Etapa 3 da última mensagem enviada (chave atual) |
 | `a`           | efeito avalanche da última mensagem enviada |
 | `e`           | demonstração do problema do ECB (bloco 1 = bloco 3) |
 

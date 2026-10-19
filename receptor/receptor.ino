@@ -37,8 +37,9 @@ uint8_t chave[16];
 uint8_t w[NUM_PALAVRAS][4];    /* chaves de rodada (44 palavras) */
 
 
-/* Imprime bytes em hexadecimal, com um espaco a cada bloco de 16 */
-void imprimirHex(const uint8_t *dados, int tamanho) {
+/* Imprime um rotulo e os bytes em hexadecimal, com um espaco a cada 16 */
+void imprimirHex(const char *rotulo, const uint8_t *dados, int tamanho) {
+  Serial.print(rotulo);
   for (int i = 0; i < tamanho; i++) {
     Serial.printf("%02X", dados[i]);
     if (i % 16 == 15 && i != tamanho - 1) {
@@ -75,14 +76,12 @@ void receberQuadro() {
   }
 
   Serial.printf("=== Quadro recebido: %d bloco(s) ===\n", numBlocos);
-  Serial.print("Cifrado:                ");
-  imprimirHex(cifrado, esperado);
+  imprimirHex("Cifrado:                ", cifrado, esperado);
 
   /* 3) decifra em ECB */
   uint8_t decifrado[MAX_BLOCOS * 16 + 1];   /* +1 para o '\0' no final */
   decifrarECB(cifrado, decifrado, esperado, w);
-  Serial.print("Decifrado (com PKCS#7): ");
-  imprimirHex(decifrado, esperado);
+  imprimirHex("Decifrado (com PKCS#7): ", decifrado, esperado);
 
   /* 4) remove o PKCS#7 */
   int tamanho = removerPadding(decifrado, esperado);
@@ -112,8 +111,7 @@ void setup() {
 
   montarChave(MATRICULA_A, MATRICULA_B, chave);
   expandirChave(chave, w);
-  Serial.print("Chave (hex): ");
-  imprimirHex(chave, 16);
+  imprimirHex("Chave (hex): ", chave, 16);
   Serial.println("Aguardando quadros na UART2...\n");
 }
 

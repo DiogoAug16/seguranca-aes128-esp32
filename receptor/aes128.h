@@ -169,26 +169,19 @@ void expandirChave(const uint8_t chave[16], uint8_t w[NUM_PALAVRAS][4]) {
   memcpy(w, chave, 16);   /* w[0..3] = a propria chave */
 
   for (int i = 4; i < NUM_PALAVRAS; i++) {
-    uint8_t temp[4];
-    memcpy(temp, w[i - 1], 4);   /* temp = w[i-1] */
+    for (int j = 0; j < 4; j++) {
+      uint8_t temp = w[i - 1][j];          /* temp = w[i-1] */
 
-    /* A cada 4 palavras (inicio de uma nova chave de rodada): o "tempero" */
-    if (i % 4 == 0) {
-      uint8_t primeiro = temp[0];          /* RotWord: [a b c d] -> [b c d a] */
-      temp[0] = temp[1];
-      temp[1] = temp[2];
-      temp[2] = temp[3];
-      temp[3] = primeiro;
-
-      for (int j = 0; j < 4; j++) {        /* SubWord: S-box em cada byte */
-        temp[j] = SBOX[temp[j]];
+      /* A cada 4 palavras (inicio de uma nova chave de rodada): o "tempero" */
+      if (i % 4 == 0) {
+        /* RotWord ([a b c d] -> [b c d a]: pega o byte j+1) + SubWord (S-box) */
+        temp = SBOX[w[i - 1][(j + 1) % 4]];
+        if (j == 0) {
+          temp ^= RCON[i / 4 - 1];         /* XOR com Rcon (deixa cada rodada diferente) */
+        }
       }
 
-      temp[0] ^= RCON[i / 4 - 1];          /* XOR com Rcon (deixa cada rodada diferente) */
-    }
-
-    for (int j = 0; j < 4; j++) {          /* w[i] = w[i-4] XOR temp */
-      w[i][j] = w[i - 4][j] ^ temp[j];
+      w[i][j] = w[i - 4][j] ^ temp;        /* w[i] = w[i-4] XOR temp */
     }
   }
 }
