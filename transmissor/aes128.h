@@ -243,4 +243,83 @@ void expandirChave(const uint8_t chave[16], uint8_t w[NUM_PALAVRAS][4]) {
   }
 }
 
+
+/* ==========================================================================
+ * AS 4 TRANSFORMACOES (cifragem)
+ * ========================================================================== */
+
+/* AddRoundKey: XOR de cada byte do estado com a chave da rodada.
+ * E a UNICA etapa que usa a chave. XOR e sua propria inversa, entao
+ * a mesma funcao serve para cifrar e decifrar.
+ * A coluna c do estado faz XOR com a palavra w[4*rodada + c]. */
+void addRoundKey(uint8_t estado[4][4], uint8_t w[NUM_PALAVRAS][4], int rodada) {
+  for (int coluna = 0; coluna < 4; coluna++) {
+    for (int linha = 0; linha < 4; linha++) {
+      estado[linha][coluna] = estado[linha][coluna] ^ w[rodada * 4 + coluna][linha];
+    }
+  }
+}
+
+/* SubBytes: troca cada byte pelo valor da S-box (confusao, nao linear). */
+void subBytes(uint8_t estado[4][4]) {
+  for (int linha = 0; linha < 4; linha++) {
+    for (int coluna = 0; coluna < 4; coluna++) {
+      estado[linha][coluna] = SBOX[estado[linha][coluna]];
+    }
+  }
+}
+
+/* ShiftRows: gira cada linha para a ESQUERDA.
+ * linha 0: nao mexe | linha 1: 1 casa | linha 2: 2 casas | linha 3: 3 casas */
+void shiftRows(uint8_t estado[4][4]) {
+  uint8_t temp;
+
+  /* Linha 0: fica parada */
+
+  /* Linha 1: gira 1 casa para a esquerda  [a b c d] -> [b c d a] */
+  temp = estado[1][0];
+  estado[1][0] = estado[1][1];
+  estado[1][1] = estado[1][2];
+  estado[1][2] = estado[1][3];
+  estado[1][3] = temp;
+
+  /* Linha 2: gira 2 casas  [a b c d] -> [c d a b]  (troca 0<->2 e 1<->3) */
+  temp = estado[2][0];
+  estado[2][0] = estado[2][2];
+  estado[2][2] = temp;
+  temp = estado[2][1];
+  estado[2][1] = estado[2][3];
+  estado[2][3] = temp;
+
+  /* Linha 3: gira 3 casas para a esquerda (= 1 casa para a direita)
+   * [a b c d] -> [d a b c] */
+  temp = estado[3][3];
+  estado[3][3] = estado[3][2];
+  estado[3][2] = estado[3][1];
+  estado[3][1] = estado[3][0];
+  estado[3][0] = temp;
+}
+
+/* MixColumns: mistura os 4 bytes de cada coluna (difusao).
+ * Cada coluna e multiplicada pela matriz fixa:
+ *   | 02 03 01 01 |
+ *   | 01 02 03 01 |
+ *   | 01 01 02 03 |
+ *   | 03 01 01 02 |
+ * Em GF(2^8): "soma" = XOR, x1 = o proprio byte, x2 = mult2, x3 = mult3. */
+void mixColumns(uint8_t estado[4][4]) {
+  for (int coluna = 0; coluna < 4; coluna++) {
+    /* copia a coluna antes de mexer, porque cada byte novo usa os 4 antigos */
+    uint8_t a0 = estado[0][coluna];
+    uint8_t a1 = estado[1][coluna];
+    uint8_t a2 = estado[2][coluna];
+    uint8_t a3 = estado[3][coluna];
+
+    estado[0][coluna] = mult2(a0) ^ mult3(a1) ^ a2        ^ a3;         /* 02 03 01 01 */
+    estado[1][coluna] = a0        ^ mult2(a1) ^ mult3(a2) ^ a3;         /* 01 02 03 01 */
+    estado[2][coluna] = a0        ^ a1        ^ mult2(a2) ^ mult3(a3);  /* 01 01 02 03 */
+    estado[3][coluna] = mult3(a0) ^ a1        ^ a2        ^ mult2(a3);  /* 03 01 01 02 */
+  }
+}
+
 #endif /* AES128_H */
