@@ -117,7 +117,6 @@ void cifrarEEnviar(const char *mensagem) {
  * ========================================================================= */
 void registrosEtapa3(const char *mensagem) {
   Serial.println("=== ETAPA 3: registros ===");
-  Serial.printf("Matriculas: A = %s  B = %s\n", MATRICULA_A, MATRICULA_B);
   Serial.printf("Chave (ASCII):   %.16s\n", (const char *)chave);
   Serial.print("Chave (hex):     ");
   imprimirHex(chave, 16);
