@@ -16,7 +16,7 @@
  *   GND ------------------- GND
  *
  * Comandos no Monitor Serial (115200, "Nova linha"):
- *   [Enter]      reenvia a mensagem da dupla
+ *   [Enter]      reenvia a mensagem da dupla e mostra a Etapa 3 dela
  *   m <texto>    cifra e envia uma mensagem nova
  *   k <n>        inverte o bit n (0..127) da chave e reenvia
  *   r            restaura a chave original
@@ -117,6 +117,9 @@ void cifrarEEnviar(const char *mensagem) {
  * ========================================================================= */
 void registrosEtapa3(const char *mensagem) {
   Serial.println("=== ETAPA 3: registros ===");
+  if (strcmp(mensagem, mensagemDupla) == 0) {
+    Serial.printf("Matriculas: A = %s  B = %s\n", MATRICULA_A, MATRICULA_B);
+  }
   Serial.printf("Chave (ASCII):   %.16s\n", (const char *)chave);
   Serial.print("Chave (hex):     ");
   imprimirHex(chave, 16);
@@ -260,8 +263,10 @@ void loop() {
   comando.trim();
 
   if (comando.length() == 0) {
-    /* Enter: reenvia a mensagem da dupla */
+    /* Enter: reenvia a mensagem da dupla e mostra a Etapa 3 dela */
     cifrarEEnviar(mensagemDupla);
+    registrosEtapa3(mensagemDupla);
+    avalanche(mensagemDupla);
 
   } else if (comando.startsWith("m ")) {
     /* m <texto>: cifra e envia uma mensagem nova */

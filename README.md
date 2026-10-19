@@ -48,7 +48,7 @@ Enviado em bytes brutos (`Serial2.write`), não em texto hexadecimal.
 
 | Comando       | O que faz |
 |---------------|-----------|
-| Enter         | reenvia a mensagem da dupla |
+| Enter         | reenvia a mensagem da dupla e mostra a Etapa 3 dela |
 | `m <texto>`   | cifra e envia uma mensagem nova |
 | `k <n>`       | inverte o bit `n` (0..127) da chave e reenvia (o receptor acusa padding inválido) |
 | `r`           | restaura a chave original |
