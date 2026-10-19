@@ -93,4 +93,94 @@ const uint8_t RCON[10] = {
   0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36
 };
 
+
+/* ==========================================================================
+ * PASSAR O BLOCO PARA A MATRIZ E DE VOLTA
+ * ========================================================================== */
+
+/* Coloca os 16 bytes do bloco na matriz 4x4, preenchendo POR COLUNA. */
+void blocoParaEstado(const uint8_t bloco[16], uint8_t estado[4][4]) {
+  for (int coluna = 0; coluna < 4; coluna++) {
+    for (int linha = 0; linha < 4; linha++) {
+      estado[linha][coluna] = bloco[coluna * 4 + linha];
+    }
+  }
+}
+
+/* Faz o caminho contrario: tira os bytes da matriz, coluna por coluna. */
+void estadoParaBloco(uint8_t estado[4][4], uint8_t bloco[16]) {
+  for (int coluna = 0; coluna < 4; coluna++) {
+    for (int linha = 0; linha < 4; linha++) {
+      bloco[coluna * 4 + linha] = estado[linha][coluna];
+    }
+  }
+}
+
+
+/* ==========================================================================
+ * MULTIPLICACAO EM GF(2^8)
+ * --------------------------------------------------------------------------
+ * No AES a "soma" de bytes e o XOR, e a multiplicacao tem regras proprias.
+ * Tudo e montado a partir da multiplicacao por 2 (xtime).
+ * ========================================================================== */
+
+/* xtime: multiplica um byte por 2 em GF(2^8).
+ * Desloca 1 bit para a esquerda; se o bit mais alto era 1 (o byte "estourou"
+ * os 8 bits), faz XOR com 0x1B, que e o polinomio redutor x^8+x^4+x^3+x+1
+ * sem o x^8. Isso mantem o resultado dentro de 1 byte.
+ * Ex.: xtime(0xd4) -> 0xa8 ^ 0x1b = 0xb3 */
+uint8_t xtime(uint8_t x) {
+  uint8_t bitMaisAlto = x & 0x80;     /* guarda o bit que vai "cair" fora */
+  uint8_t resultado = x << 1;         /* desloca 1 bit para a esquerda    */
+
+  if (bitMaisAlto != 0) {             /* se o bit que caiu era 1...       */
+    resultado = resultado ^ 0x1b;     /* ...reduz com 0x1B                */
+  }
+  return resultado;
+}
+
+/* x2 */
+uint8_t mult2(uint8_t x) {
+  return xtime(x);
+}
+
+/* x3 = (x2) XOR x */
+uint8_t mult3(uint8_t x) {
+  return xtime(x) ^ x;
+}
+
+/* As multiplicacoes abaixo so sao usadas no InvMixColumns (decifrar).
+ * Todas sao feitas so com xtime e XOR:
+ *   x9  = x8 ^ x
+ *   x11 = x8 ^ x2 ^ x
+ *   x13 = x8 ^ x4 ^ x
+ *   x14 = x8 ^ x4 ^ x2                                                       */
+uint8_t mult9(uint8_t x) {
+  uint8_t x2 = xtime(x);
+  uint8_t x4 = xtime(x2);
+  uint8_t x8 = xtime(x4);
+  return x8 ^ x;
+}
+
+uint8_t mult11(uint8_t x) {
+  uint8_t x2 = xtime(x);
+  uint8_t x4 = xtime(x2);
+  uint8_t x8 = xtime(x4);
+  return x8 ^ x2 ^ x;
+}
+
+uint8_t mult13(uint8_t x) {
+  uint8_t x2 = xtime(x);
+  uint8_t x4 = xtime(x2);
+  uint8_t x8 = xtime(x4);
+  return x8 ^ x4 ^ x;
+}
+
+uint8_t mult14(uint8_t x) {
+  uint8_t x2 = xtime(x);
+  uint8_t x4 = xtime(x2);
+  uint8_t x8 = xtime(x4);
+  return x8 ^ x4 ^ x2;
+}
+
 #endif /* AES128_H */
