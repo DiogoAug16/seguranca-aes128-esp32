@@ -6,7 +6,9 @@
  * O que faz:
  *   1. Testa o AES com os vetores do FIPS-197 (Apendices B e C.1).
  *   2. Monta a chave e a mensagem com as matriculas da dupla.
- *   3. Cifra em ECB e envia o quadro pela UART2:
+ *   3. Imprime os registros da Etapa 3 (chave, mensagem, chaves de rodada
+ *      0 e 1, os 5 estados do bloco 1 e o efeito avalanche).
+ *   4. Cifra em ECB e envia o quadro pela UART2:
  *        [0xAA] [n blocos] [16*n bytes cifrados]   (bytes brutos)
  *
  * Ligacao (UART2, 115200 8N1):
@@ -14,7 +16,13 @@
  *   Placa A GPIO16 (RX2) <--- Placa B GPIO17 (TX2)
  *   GND ------------------- GND
  *
- * Monitor Serial (115200, "Nova linha"): aperte Enter para reenviar.
+ * Comandos no Monitor Serial (115200, "Nova linha"):
+ *   [Enter]      reenvia a mensagem da dupla
+ *   m <texto>    cifra e envia uma mensagem nova
+ *   k <n>        inverte o bit n (0..127) da chave e reenvia
+ *   r            restaura a chave original
+ *   a            mostra o efeito avalanche de novo
+ *   e            demonstracao do problema do ECB
  */
 
 #include "aes128.h"
@@ -157,6 +165,134 @@ void cifrarEEnviar(const char *mensagem) {
 
 
 /* =========================================================================
+ * ETAPA 3: REGISTROS DA DUPLA
+ * ========================================================================= */
+void registrosEtapa3() {
+  Serial.println("=== ETAPA 3: registros da dupla ===");
+  Serial.printf("Matricula A: %s\n", MATRICULA_A);
+  Serial.printf("Matricula B: %s\n", MATRICULA_B);
+
+  Serial.print("Chave (ASCII): ");
+  for (int i = 0; i < 16; i++) {
+    Serial.print((char)chave[i]);
+  }
+  Serial.println();
+  Serial.print("Chave (hex):     ");
+  imprimirHex(chave, 16);
+  imprimirChaveRodada(0);
+  imprimirChaveRodada(1);
+
+  /* mensagem com padding e cifrada */
+  uint8_t comPadding[MAX_BYTES];
+  uint8_t cifrado[MAX_BYTES];
+  int total = adicionarPadding((const uint8_t *)mensagemDupla, strlen(mensagemDupla), comPadding);
+  cifrarECB(comPadding, cifrado, total, w);
+
+  Serial.printf("Mensagem:        %s\n", mensagemDupla);
+  Serial.print("Com PKCS#7:      ");
+  imprimirHex(comPadding, total);
+  Serial.print("Cifrado final:   ");
+  imprimirHex(cifrado, total);
+
+  /* Os 5 estados do bloco 1 na rodada 1.
+   * Aqui chamamos as transformacoes uma por uma, na mesma ordem do
+   * cifrarBloco, para poder imprimir o estado depois de cada uma. */
+  uint8_t estado[4][4];
+  blocoParaEstado(comPadding, estado);      /* bloco 1 = primeiros 16 bytes */
+
+  Serial.println();
+  Serial.println("--- Bloco 1, rodada 1 ---");
+  Serial.println("(0) Bloco 1 original:");
+  imprimirEstado(estado);
+
+  addRoundKey(estado, w, 0);
+  Serial.println("(1) Apos AddRoundKey inicial (chave 0):");
+  imprimirEstado(estado);
+
+  subBytes(estado);
+  Serial.println("(2) Apos SubBytes:");
+  imprimirEstado(estado);
+
+  shiftRows(estado);
+  Serial.println("(3) Apos ShiftRows:");
+  imprimirEstado(estado);
+
+  mixColumns(estado);
+  Serial.println("(4) Apos MixColumns:");
+  imprimirEstado(estado);
+
+  addRoundKey(estado, w, 1);
+  Serial.println("(5) Apos AddRoundKey (chave 1):");
+  imprimirEstado(estado);
+  Serial.println();
+}
+
+
+/* =========================================================================
+ * EFEITO AVALANCHE: muda 1 bit e conta quantos bits do cifrado mudaram
+ * ========================================================================= */
+void avalanche() {
+  Serial.println("=== Efeito avalanche (bloco 1) ===");
+
+  uint8_t comPadding[MAX_BYTES];
+  uint8_t cifradoOriginal[16];
+  uint8_t cifradoNovo[16];
+  adicionarPadding((const uint8_t *)mensagemDupla, strlen(mensagemDupla), comPadding);
+  cifrarBloco(comPadding, cifradoOriginal, w);
+
+  Serial.print("Cifrado original:          ");
+  imprimirHex(cifradoOriginal, 16);
+
+  /* 1) inverte o ultimo bit do 1o byte da CHAVE e cifra de novo */
+  uint8_t chave2[16];
+  uint8_t w2[NUM_PALAVRAS][4];
+  for (int i = 0; i < 16; i++) {
+    chave2[i] = chave[i];
+  }
+  chave2[0] = chave2[0] ^ 0x01;
+  expandirChave(chave2, w2);
+  cifrarBloco(comPadding, cifradoNovo, w2);
+
+  int bits = contarBitsDiferentes(cifradoOriginal, cifradoNovo, 16);
+  Serial.print("1 bit da chave invertido:  ");
+  imprimirHex(cifradoNovo, 16);
+  Serial.printf("  -> %d de 128 bits mudaram (%.1f%%)\n", bits, bits * 100.0 / 128);
+
+  /* 2) inverte o ultimo bit do 1o byte da MENSAGEM e cifra de novo */
+  uint8_t mensagem2[16];
+  for (int i = 0; i < 16; i++) {
+    mensagem2[i] = comPadding[i];
+  }
+  mensagem2[0] = mensagem2[0] ^ 0x01;       /* 'A' (0x41) vira '@' (0x40) */
+  cifrarBloco(mensagem2, cifradoNovo, w);
+
+  bits = contarBitsDiferentes(cifradoOriginal, cifradoNovo, 16);
+  Serial.print("1 bit da msg invertido:    ");
+  imprimirHex(cifradoNovo, 16);
+  Serial.printf("  -> %d de 128 bits mudaram (%.1f%%)\n", bits, bits * 100.0 / 128);
+  Serial.println();
+}
+
+
+/* =========================================================================
+ * DEMONSTRACAO DO PROBLEMA DO ECB: bloco 1 == bloco 3
+ * ========================================================================= */
+void demonstracaoECB() {
+  Serial.println("=== Demonstracao ECB ===");
+  Serial.println("Blocos: [LIGAR LED VERDE.] [DESLIGAR LED    ] [LIGAR LED VERDE.]");
+  cifrarEEnviar("LIGAR LED VERDE.DESLIGAR LED    LIGAR LED VERDE.");
+  Serial.println("Repare: o 1o e o 3o bloco cifrado sao IGUAIS.");
+  Serial.println("Um espiao na UART ve que o comando se repetiu e pode reenviar o bloco.");
+  Serial.println();
+}
+
+void mostrarComandos() {
+  Serial.println("Comandos: [Enter]=reenvia | m <texto> | k <bit 0..127> | r | a | e");
+  Serial.println();
+}
+
+
+/* =========================================================================
  * ARDUINO
  * ========================================================================= */
 void setup() {
@@ -169,7 +305,7 @@ void setup() {
   Serial.println();
   autoteste();
 
-  /* monta a chave com as matriculas */
+  /* monta a chave com as matriculas e guarda uma copia */
   montarChave(MATRICULA_A, MATRICULA_B, chaveOriginal);
   for (int i = 0; i < 16; i++) {
     chave[i] = chaveOriginal[i];
@@ -182,14 +318,66 @@ void setup() {
   strcat(mensagemDupla, ";B:");
   strcat(mensagemDupla, MATRICULA_B);
 
+  registrosEtapa3();
+  avalanche();
+
   Serial.println("=== ETAPA 2: envio pela UART ===");
   cifrarEEnviar(mensagemDupla);
+  mostrarComandos();
 }
 
 void loop() {
-  /* Enter no Monitor Serial: reenvia a mensagem */
-  if (Serial.available() > 0) {
-    Serial.readStringUntil('\n');
+  /* espera alguem digitar algo no Monitor Serial */
+  if (Serial.available() == 0) {
+    return;
+  }
+
+  String comando = Serial.readStringUntil('\n');
+  comando.trim();
+
+  if (comando.length() == 0) {
+    /* Enter: reenvia a mensagem da dupla */
     cifrarEEnviar(mensagemDupla);
+
+  } else if (comando.startsWith("m ")) {
+    /* m <texto>: cifra e envia uma mensagem nova */
+    String texto = comando.substring(2);
+    cifrarEEnviar(texto.c_str());
+
+  } else if (comando.startsWith("k ")) {
+    /* k <n>: inverte o bit n da chave (bit 0 = bit mais alto do byte 0) */
+    int bit = comando.substring(2).toInt();
+    if (bit < 0 || bit > 127) {
+      Serial.println("O bit deve ser de 0 a 127");
+      return;
+    }
+    int qualByte = bit / 8;
+    int posicao  = 7 - (bit % 8);
+    chave[qualByte] = chave[qualByte] ^ (1 << posicao);
+    expandirChave(chave, w);
+
+    Serial.printf("Bit %d da chave invertido.\n", bit);
+    Serial.print("Chave agora: ");
+    imprimirHex(chave, 16);
+    Serial.println("(o receptor continua com a chave original -> nao vai conseguir decifrar)");
+    cifrarEEnviar(mensagemDupla);
+
+  } else if (comando == "r") {
+    /* r: volta para a chave original */
+    for (int i = 0; i < 16; i++) {
+      chave[i] = chaveOriginal[i];
+    }
+    expandirChave(chave, w);
+    Serial.println("Chave original restaurada.");
+    cifrarEEnviar(mensagemDupla);
+
+  } else if (comando == "a") {
+    avalanche();
+
+  } else if (comando == "e") {
+    demonstracaoECB();
+
+  } else {
+    mostrarComandos();
   }
 }
