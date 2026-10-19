@@ -437,4 +437,108 @@ void decifrarBloco(const uint8_t entrada[16], uint8_t saida[16], uint8_t w[NUM_P
   estadoParaBloco(estado, saida);
 }
 
+
+/* ==========================================================================
+ * PKCS#7 E MODO ECB
+ * ========================================================================== */
+
+/* Acrescenta PKCS#7: de 1 a 16 bytes, todos com o valor da quantidade.
+ * Se a mensagem ja tem tamanho multiplo de 16, entra um bloco inteiro de 0x10
+ * (assim o receptor SEMPRE sabe quanto remover).
+ * Retorna o tamanho final (multiplo de 16).                                 */
+int adicionarPadding(const uint8_t *mensagem, int tamanho, uint8_t *saida) {
+  int falta = 16 - (tamanho % 16);      /* sempre da entre 1 e 16 */
+
+  /* copia a mensagem */
+  for (int i = 0; i < tamanho; i++) {
+    saida[i] = mensagem[i];
+  }
+
+  /* completa com 'falta' bytes, todos com o valor 'falta' */
+  for (int i = 0; i < falta; i++) {
+    saida[tamanho + i] = falta;
+  }
+
+  return tamanho + falta;
+}
+
+/* Remove PKCS#7. Confere se o padding e valido (se nao for, a chave estava
+ * errada ou os dados chegaram corrompidos). Retorna o tamanho original ou -1. */
+int removerPadding(const uint8_t *dados, int tamanho) {
+  if (tamanho == 0 || tamanho % 16 != 0) {
+    return -1;
+  }
+
+  /* o ultimo byte diz quantos bytes de padding existem */
+  int padding = dados[tamanho - 1];
+  if (padding < 1 || padding > 16) {
+    return -1;
+  }
+
+  /* todos os bytes de padding tem que ter o mesmo valor */
+  for (int i = 1; i <= padding; i++) {
+    if (dados[tamanho - i] != padding) {
+      return -1;
+    }
+  }
+
+  return tamanho - padding;
+}
+
+/* ECB: cifra cada bloco de 16 bytes de forma independente, com a mesma chave.
+ * (Por isso blocos iguais geram cifrados iguais - o problema do ECB.)       */
+void cifrarECB(const uint8_t *entrada, uint8_t *saida, int tamanho, uint8_t w[NUM_PALAVRAS][4]) {
+  int numBlocos = tamanho / 16;
+  for (int b = 0; b < numBlocos; b++) {
+    cifrarBloco(&entrada[b * 16], &saida[b * 16], w);
+  }
+}
+
+void decifrarECB(const uint8_t *entrada, uint8_t *saida, int tamanho, uint8_t w[NUM_PALAVRAS][4]) {
+  int numBlocos = tamanho / 16;
+  for (int b = 0; b < numBlocos; b++) {
+    decifrarBloco(&entrada[b * 16], &saida[b * 16], w);
+  }
+}
+
+
+/* ==========================================================================
+ * CHAVE A PARTIR DAS MATRICULAS
+ * --------------------------------------------------------------------------
+ * 8 ultimos digitos da matricula A + 8 ultimos da B (completa com '0' a
+ * esquerda se tiver menos de 8). Cada caractere vira seu codigo ASCII.
+ * Ex.: "20231001" + "20231002" -> 32 30 32 33 31 30 30 31 32 30 32 33 ...
+ * (a matricula deve ser escrita so com numeros)                              */
+void pegarUltimos8(const char *matricula, uint8_t saida[8]) {
+  int tamanho = strlen(matricula);
+
+  for (int i = 0; i < 8; i++) {
+    int posicao = tamanho - 8 + i;      /* posicao dentro dos ultimos 8 */
+    if (posicao >= 0) {
+      saida[i] = matricula[posicao];
+    } else {
+      saida[i] = '0';                   /* matricula curta: completa com '0' */
+    }
+  }
+}
+
+void montarChave(const char *matriculaA, const char *matriculaB, uint8_t chave[16]) {
+  pegarUltimos8(matriculaA, &chave[0]);   /* bytes 0 a 7  */
+  pegarUltimos8(matriculaB, &chave[8]);   /* bytes 8 a 15 */
+}
+
+/* Conta quantos bits sao diferentes entre dois vetores (efeito avalanche). */
+int contarBitsDiferentes(const uint8_t *a, const uint8_t *b, int tamanho) {
+  int total = 0;
+  for (int i = 0; i < tamanho; i++) {
+    uint8_t diferenca = a[i] ^ b[i];    /* fica 1 onde os bits sao diferentes */
+    for (int bit = 0; bit < 8; bit++) {
+      if (diferenca & (1 << bit)) {
+        total++;
+      }
+    }
+  }
+  return total;
+}
+
 #endif /* AES128_H */
