@@ -191,11 +191,28 @@ void avalanche() {
  * DEMONSTRACAO DO PROBLEMA DO ECB: bloco 1 == bloco 3
  * ========================================================================= */
 void demonstracaoECB() {
-  Serial.println("=== Demonstracao ECB ===");
-  Serial.println("Blocos: [LIGAR LED VERDE.] [DESLIGAR LED    ] [LIGAR LED VERDE.]");
-  cifrarEEnviar("LIGAR LED VERDE.DESLIGAR LED    LIGAR LED VERDE.");
+  const char *blocos[3] = {"LIGAR LED VERDE.", "DESLIGAR LED    ", "LIGAR LED VERDE."};
+
+  /* 1) os 3 blocos com a chave do exemplo do enunciado (confere com a tabela) */
+  uint8_t chaveExemplo[16];
+  uint8_t wExemplo[NUM_PALAVRAS][4];
+  uint8_t cifrado[16];
+  montarChave("20231001", "20231002", chaveExemplo);
+  expandirChave(chaveExemplo, wExemplo);
+
+  Serial.println("=== Demonstracao ECB (chave do exemplo do enunciado) ===");
+  for (int i = 0; i < 3; i++) {
+    cifrarBloco((const uint8_t *)blocos[i], cifrado, wExemplo);
+    Serial.printf("Bloco %d \"%s\" -> ", i + 1, blocos[i]);
+    imprimirHex(cifrado, 16);
+  }
   Serial.println("Repare: o 1o e o 3o bloco cifrado sao IGUAIS.");
   Serial.println("Um espiao na UART ve que o comando se repetiu e pode reenviar o bloco.\n");
+
+  /* 2) envia os mesmos blocos com a chave da dupla. Como 48 bytes ja e
+   * multiplo de 16, o PKCS#7 acrescenta um 4o bloco inteiro de 0x10. */
+  Serial.println("Enviando os 3 blocos com a chave da dupla (o 4o bloco e o PKCS#7):");
+  cifrarEEnviar("LIGAR LED VERDE.DESLIGAR LED    LIGAR LED VERDE.");
 }
 
 
