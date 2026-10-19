@@ -4,6 +4,28 @@ Trabalho prático de Segurança de Sistemas de Computação (IFMT).
 AES-128 implementado do zero (sem biblioteca de criptografia), modo ECB com PKCS#7.
 A placa A cifra a mensagem da dupla e envia pela UART2; a placa B decifra e mostra o texto.
 
+## Estrutura
+
+```
+transmissor/
+  transmissor.ino   placa A: autoteste, registros da Etapa 3, cifra e envia
+  aes128.h          AES-128 (igual nas duas pastas)
+receptor/
+  receptor.ino      placa B: sincroniza no 0xAA, lê, decifra, remove PKCS#7
+  aes128.h
+teste_pc/
+  teste.c           testes no PC (FIPS-197 + valores do enunciado)
+```
+
+## Antes de gravar
+
+Troque as matrículas no topo **dos dois** `.ino` (têm que ser iguais):
+
+```c
+const char *MATRICULA_A = "20231001";
+const char *MATRICULA_B = "20231002";
+```
+
 ## Ligação (UART2, 115200 bps, 8N1)
 
 | Placa A        | Placa B        |
@@ -11,3 +33,53 @@ A placa A cifra a mensagem da dupla e envia pela UART2; a placa B decifra e most
 | GPIO17 (TX2)   | GPIO16 (RX2)   |
 | GPIO16 (RX2)   | GPIO17 (TX2)   |
 | GND            | GND            |
+
+## Quadro enviado
+
+| Campo            | Tamanho     |
+|------------------|-------------|
+| Marcador `0xAA`  | 1 byte      |
+| Nº de blocos `n` | 1 byte      |
+| Blocos cifrados  | 16 × n bytes |
+
+Enviado em bytes brutos (`Serial2.write`), não em texto hexadecimal.
+
+## Comandos no Monitor Serial da placa A (115200, "Nova linha")
+
+| Comando       | O que faz |
+|---------------|-----------|
+| Enter         | reenvia a mensagem da dupla |
+| `m <texto>`   | cifra e envia uma mensagem nova |
+| `k <n>`       | inverte o bit `n` (0..127) da chave e reenvia (o receptor acusa padding inválido) |
+| `r`           | restaura a chave original |
+| `a`           | mostra o efeito avalanche |
+| `e`           | demonstração do problema do ECB (bloco 1 = bloco 3) |
+
+## Onde está cada parte do AES (`aes128.h`)
+
+| Etapa | Função |
+|-------|--------|
+| Bloco ↔ matriz 4×4 | `blocoParaEstado` / `estadoParaBloco` |
+| Expansão de chave | `expandirChave` (+ `rotWord`, `subWord`) |
+| AddRoundKey | `addRoundKey` |
+| SubBytes / inversa | `subBytes` / `invSubBytes` |
+| ShiftRows / inversa | `shiftRows` / `invShiftRows` |
+| MixColumns / inversa | `mixColumns` / `invMixColumns` |
+| Multiplicação em GF(2⁸) | `xtime`, `mult2`, `mult3`, `mult9`, `mult11`, `mult13`, `mult14` |
+| Cifrar / decifrar 1 bloco | `cifrarBloco` / `decifrarBloco` |
+| PKCS#7 | `adicionarPadding` / `removerPadding` |
+| ECB | `cifrarECB` / `decifrarECB` |
+| Chave das matrículas | `montarChave` |
+
+A S-box e a S-box inversa foram tiradas do FIPS-197 (NIST), Tabelas 4 e 6:
+https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf
+
+## Teste no PC
+
+```
+cd teste_pc
+gcc -I../transmissor teste.c -o teste && ./teste
+```
+
+Confere os vetores do FIPS-197 (Apêndices B e C.1), os 5 estados da rodada 1,
+o exemplo do enunciado e os 3 blocos da demonstração do ECB.

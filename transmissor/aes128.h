@@ -1,5 +1,5 @@
 /*
- * aes128.h  -  AES-128 implementado do zero (sem biblioteca de criptografia)
+ * aes128.h
  * --------------------------------------------------------------------------
  * Trabalho Pratico: AES-128 em dois ESP32 via UART
  * Seguranca de Sistemas de Computacao - IFMT
@@ -34,9 +34,7 @@
 /* ==========================================================================
  * S-BOX
  * --------------------------------------------------------------------------
- * Fonte: FIPS-197 (NIST), Tabela 4 (versao atualizada de 2023).
  *
- * Origem (o professor pede para saber): ela NAO e aleatoria.
  * Para cada byte x:
  *   1) calcula o inverso de x no corpo GF(2^8) (o 0 vira 0);
  *   2) aplica uma transformacao afim fixa nos bits e faz XOR com 0x63.
@@ -45,7 +43,6 @@
  * cada byte.
  *
  * Como consultar: o byte 0x19 -> linha 1, coluna 9 da tabela -> 0xd4.
- * Em C isso e simplesmente SBOX[0x19].
  * ========================================================================== */
 const uint8_t SBOX[256] = {
   0x63,0x7c,0x77,0x7b,0xf2,0x6b,0x6f,0xc5,0x30,0x01,0x67,0x2b,0xfe,0xd7,0xab,0x76,
@@ -66,8 +63,7 @@ const uint8_t SBOX[256] = {
   0x8c,0xa1,0x89,0x0d,0xbf,0xe6,0x42,0x68,0x41,0x99,0x2d,0x0f,0xb0,0x54,0xbb,0x16
 };
 
-/* S-box inversa: desfaz a S-box (INV_SBOX[SBOX[x]] == x). Usada para decifrar.
- * Fonte: FIPS-197, Tabela 6. */
+/* S-box inversa: desfaz a S-box (INV_SBOX[SBOX[x]] == x). Usada para decifrar.*/
 const uint8_t INV_SBOX[256] = {
   0x52,0x09,0x6a,0xd5,0x30,0x36,0xa5,0x38,0xbf,0x40,0xa3,0x9e,0x81,0xf3,0xd7,0xfb,
   0x7c,0xe3,0x39,0x82,0x9b,0x2f,0xff,0x87,0x34,0x8e,0x43,0x44,0xc4,0xde,0xe9,0xcb,
