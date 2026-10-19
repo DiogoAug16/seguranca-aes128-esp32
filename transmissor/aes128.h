@@ -183,4 +183,64 @@ uint8_t mult14(uint8_t x) {
   return x8 ^ x4 ^ x2;
 }
 
+
+/* ==========================================================================
+ * EXPANSAO DE CHAVE (Key Expansion)
+ * --------------------------------------------------------------------------
+ * Transforma a chave de 16 bytes em 11 chaves de rodada.
+ * Trabalha com "palavras" de 4 bytes: w[0] ate w[43].
+ *   - w[0..3]   = a propria chave
+ *   - w[i]      = w[i-1] XOR w[i-4]
+ *   - quando i e multiplo de 4, antes do XOR, w[i-1] passa por:
+ *       RotWord (gira 1 byte), SubWord (S-box em cada byte) e XOR com Rcon.
+ * A chave da rodada r sao as palavras w[4r], w[4r+1], w[4r+2], w[4r+3].
+ * ========================================================================== */
+
+/* RotWord: gira a palavra 1 byte para a esquerda: [a b c d] -> [b c d a] */
+void rotWord(uint8_t palavra[4]) {
+  uint8_t primeiro = palavra[0];
+  palavra[0] = palavra[1];
+  palavra[1] = palavra[2];
+  palavra[2] = palavra[3];
+  palavra[3] = primeiro;
+}
+
+/* SubWord: passa cada um dos 4 bytes pela S-box (nao linearidade) */
+void subWord(uint8_t palavra[4]) {
+  for (int i = 0; i < 4; i++) {
+    palavra[i] = SBOX[palavra[i]];
+  }
+}
+
+void expandirChave(const uint8_t chave[16], uint8_t w[NUM_PALAVRAS][4]) {
+  /* As 4 primeiras palavras sao a propria chave */
+  for (int i = 0; i < 4; i++) {
+    for (int j = 0; j < 4; j++) {
+      w[i][j] = chave[i * 4 + j];
+    }
+  }
+
+  /* Gera as palavras w[4] ate w[43] */
+  for (int i = 4; i < NUM_PALAVRAS; i++) {
+
+    /* temp = palavra anterior, w[i-1] */
+    uint8_t temp[4];
+    for (int j = 0; j < 4; j++) {
+      temp[j] = w[i - 1][j];
+    }
+
+    /* A cada 4 palavras (inicio de uma nova chave de rodada): o "tempero" */
+    if (i % 4 == 0) {
+      rotWord(temp);                    /* gira 1 byte             */
+      subWord(temp);                    /* S-box em cada byte      */
+      temp[0] = temp[0] ^ RCON[i / 4 - 1];  /* XOR com Rcon (deixa cada rodada diferente) */
+    }
+
+    /* w[i] = w[i-4] XOR temp */
+    for (int j = 0; j < 4; j++) {
+      w[i][j] = w[i - 4][j] ^ temp[j];
+    }
+  }
+}
+
 #endif /* AES128_H */
