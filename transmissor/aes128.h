@@ -322,4 +322,66 @@ void mixColumns(uint8_t estado[4][4]) {
   }
 }
 
+
+/* ==========================================================================
+ * AS INVERSAS (decifragem)
+ * ========================================================================== */
+
+/* InvSubBytes: usa a S-box inversa. */
+void invSubBytes(uint8_t estado[4][4]) {
+  for (int linha = 0; linha < 4; linha++) {
+    for (int coluna = 0; coluna < 4; coluna++) {
+      estado[linha][coluna] = INV_SBOX[estado[linha][coluna]];
+    }
+  }
+}
+
+/* InvShiftRows: gira cada linha para a DIREITA (desfaz o ShiftRows). */
+void invShiftRows(uint8_t estado[4][4]) {
+  uint8_t temp;
+
+  /* Linha 1: gira 1 casa para a direita  [a b c d] -> [d a b c] */
+  temp = estado[1][3];
+  estado[1][3] = estado[1][2];
+  estado[1][2] = estado[1][1];
+  estado[1][1] = estado[1][0];
+  estado[1][0] = temp;
+
+  /* Linha 2: gira 2 casas (igual ao ShiftRows, girar 2 para qualquer lado da no mesmo) */
+  temp = estado[2][0];
+  estado[2][0] = estado[2][2];
+  estado[2][2] = temp;
+  temp = estado[2][1];
+  estado[2][1] = estado[2][3];
+  estado[2][3] = temp;
+
+  /* Linha 3: gira 3 casas para a direita (= 1 casa para a esquerda)
+   * [a b c d] -> [b c d a] */
+  temp = estado[3][0];
+  estado[3][0] = estado[3][1];
+  estado[3][1] = estado[3][2];
+  estado[3][2] = estado[3][3];
+  estado[3][3] = temp;
+}
+
+/* InvMixColumns: mesma ideia, com a matriz inversa:
+ *   | 0e 0b 0d 09 |
+ *   | 09 0e 0b 0d |
+ *   | 0d 09 0e 0b |
+ *   | 0b 0d 09 0e |
+ * (0e = 14, 0b = 11, 0d = 13, 09 = 9)                                      */
+void invMixColumns(uint8_t estado[4][4]) {
+  for (int coluna = 0; coluna < 4; coluna++) {
+    uint8_t a0 = estado[0][coluna];
+    uint8_t a1 = estado[1][coluna];
+    uint8_t a2 = estado[2][coluna];
+    uint8_t a3 = estado[3][coluna];
+
+    estado[0][coluna] = mult14(a0) ^ mult11(a1) ^ mult13(a2) ^ mult9(a3);
+    estado[1][coluna] = mult9(a0)  ^ mult14(a1) ^ mult11(a2) ^ mult13(a3);
+    estado[2][coluna] = mult13(a0) ^ mult9(a1)  ^ mult14(a2) ^ mult11(a3);
+    estado[3][coluna] = mult11(a0) ^ mult13(a1) ^ mult9(a2)  ^ mult14(a3);
+  }
+}
+
 #endif /* AES128_H */
