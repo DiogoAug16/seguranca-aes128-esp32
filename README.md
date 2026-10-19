@@ -60,16 +60,17 @@ Enviado em bytes brutos (`Serial2.write`), não em texto hexadecimal.
 | Etapa | Função |
 |-------|--------|
 | Bloco ↔ matriz 4×4 | `blocoParaEstado` / `estadoParaBloco` |
-| Expansão de chave | `expandirChave` (+ `rotWord`, `subWord`) |
+| Expansão de chave | `expandirChave` (RotWord, SubWord e Rcon dentro dela) |
 | AddRoundKey | `addRoundKey` |
-| SubBytes / inversa | `subBytes` / `invSubBytes` |
-| ShiftRows / inversa | `shiftRows` / `invShiftRows` |
-| MixColumns / inversa | `mixColumns` / `invMixColumns` |
-| Multiplicação em GF(2⁸) | `xtime`, `mult2`, `mult3`, `mult9`, `mult11`, `mult13`, `mult14` |
+| SubBytes / inversa | `subBytes` / `invSubBytes` (via `substituirBytes`) |
+| ShiftRows / inversa | `shiftRows` / `invShiftRows` (via `girarLinhas`) |
+| MixColumns / inversa | `mixColumns` / `invMixColumns` (via `multiplicarColunas`, matrizes `MIX` / `INV_MIX`) |
+| Multiplicação em GF(2⁸) | `xtime`, `gmul` |
 | Cifrar / decifrar 1 bloco | `cifrarBloco` / `decifrarBloco` |
 | PKCS#7 | `adicionarPadding` / `removerPadding` |
 | ECB | `cifrarECB` / `decifrarECB` |
 | Chave das matrículas | `montarChave` |
+| Validação FIPS-197 (nas duas placas) | `validarFIPS197` |
 
 A S-box e a S-box inversa foram tiradas do FIPS-197 (NIST), Tabelas 4 e 6:
 https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf

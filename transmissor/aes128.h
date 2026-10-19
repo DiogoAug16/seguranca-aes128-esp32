@@ -5,8 +5,8 @@
  * Seguranca de Sistemas de Computacao - IFMT
  *
  * Este arquivo e o MESMO no transmissor e no receptor.
- * Ele so tem o AES em si (cifrar/decifrar 1 bloco de 16 bytes) e o
- * PKCS#7. Nada de Serial aqui, para poder testar tambem no PC.
+ * Ele so tem o AES em si (cifrar/decifrar 1 bloco de 16 bytes), o PKCS#7 e
+ * o ECB. Nada de Serial aqui, para poder testar tambem no PC.
  *
  * Organizacao do estado:
  *   O AES enxerga o bloco de 16 bytes como uma tabela 4x4, que chamamos de
@@ -27,14 +27,11 @@
 #include <stdint.h>
 #include <string.h>
 
-#define TAMANHO_BLOCO  16   /* tamanho do bloco: 128 bits = 16 bytes        */
-#define NUM_RODADAS    10   /* AES-128 tem 10 rodadas                       */
 #define NUM_PALAVRAS   44   /* 11 chaves de rodada x 4 palavras = 44 palavras */
 
 /* ==========================================================================
- * S-BOX
+ * S-BOX (FIPS-197, Tabela 4)
  * --------------------------------------------------------------------------
- *
  * Para cada byte x:
  *   1) calcula o inverso de x no corpo GF(2^8) (o 0 vira 0);
  *   2) aplica uma transformacao afim fixa nos bits e faz XOR com 0x63.
@@ -63,7 +60,8 @@ const uint8_t SBOX[256] = {
   0x8c,0xa1,0x89,0x0d,0xbf,0xe6,0x42,0x68,0x41,0x99,0x2d,0x0f,0xb0,0x54,0xbb,0x16
 };
 
-/* S-box inversa: desfaz a S-box (INV_SBOX[SBOX[x]] == x). Usada para decifrar.*/
+/* S-box inversa (FIPS-197, Tabela 6): desfaz a S-box (INV_SBOX[SBOX[x]] == x).
+ * Usada para decifrar. */
 const uint8_t INV_SBOX[256] = {
   0x52,0x09,0x6a,0xd5,0x30,0x36,0xa5,0x38,0xbf,0x40,0xa3,0x9e,0x81,0xf3,0xd7,0xfb,
   0x7c,0xe3,0x39,0x82,0x9b,0x2f,0xff,0x87,0x34,0x8e,0x43,0x44,0xc4,0xde,0xe9,0xcb,
@@ -89,27 +87,34 @@ const uint8_t RCON[10] = {
   0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36
 };
 
+/* Matrizes fixas do MixColumns e do InvMixColumns */
+const uint8_t MIX[4][4] = {
+  {0x02, 0x03, 0x01, 0x01},
+  {0x01, 0x02, 0x03, 0x01},
+  {0x01, 0x01, 0x02, 0x03},
+  {0x03, 0x01, 0x01, 0x02}
+};
+const uint8_t INV_MIX[4][4] = {
+  {0x0e, 0x0b, 0x0d, 0x09},
+  {0x09, 0x0e, 0x0b, 0x0d},
+  {0x0d, 0x09, 0x0e, 0x0b},
+  {0x0b, 0x0d, 0x09, 0x0e}
+};
+
 
 /* ==========================================================================
- * PASSAR O BLOCO PARA A MATRIZ E DE VOLTA
+ * PASSAR O BLOCO PARA A MATRIZ E DE VOLTA (preenchendo POR COLUNA)
  * ========================================================================== */
-
-/* Coloca os 16 bytes do bloco na matriz 4x4, preenchendo POR COLUNA. */
 void blocoParaEstado(const uint8_t bloco[16], uint8_t estado[4][4]) {
-  for (int coluna = 0; coluna < 4; coluna++) {
-    for (int linha = 0; linha < 4; linha++) {
+  for (int coluna = 0; coluna < 4; coluna++)
+    for (int linha = 0; linha < 4; linha++)
       estado[linha][coluna] = bloco[coluna * 4 + linha];
-    }
-  }
 }
 
-/* Faz o caminho contrario: tira os bytes da matriz, coluna por coluna. */
 void estadoParaBloco(uint8_t estado[4][4], uint8_t bloco[16]) {
-  for (int coluna = 0; coluna < 4; coluna++) {
-    for (int linha = 0; linha < 4; linha++) {
+  for (int coluna = 0; coluna < 4; coluna++)
+    for (int linha = 0; linha < 4; linha++)
       bloco[coluna * 4 + linha] = estado[linha][coluna];
-    }
-  }
 }
 
 
@@ -126,57 +131,25 @@ void estadoParaBloco(uint8_t estado[4][4], uint8_t bloco[16]) {
  * sem o x^8. Isso mantem o resultado dentro de 1 byte.
  * Ex.: xtime(0xd4) -> 0xa8 ^ 0x1b = 0xb3 */
 uint8_t xtime(uint8_t x) {
-  uint8_t bitMaisAlto = x & 0x80;     /* guarda o bit que vai "cair" fora */
-  uint8_t resultado = x << 1;         /* desloca 1 bit para a esquerda    */
+  if (x & 0x80) {
+    return (x << 1) ^ 0x1b;
+  }
+  return x << 1;
+}
 
-  if (bitMaisAlto != 0) {             /* se o bit que caiu era 1...       */
-    resultado = resultado ^ 0x1b;     /* ...reduz com 0x1B                */
+/* gmul: multiplica x por n em GF(2^8), so com xtime e XOR.
+ * Para cada bit 1 de n soma (XOR) a potencia de 2 correspondente de x.
+ * Ex.: x * 0x0b = x*8 ^ x*2 ^ x  (0x0b = 1011 em binario) */
+uint8_t gmul(uint8_t x, uint8_t n) {
+  uint8_t resultado = 0;
+  while (n) {
+    if (n & 1) {
+      resultado ^= x;
+    }
+    x = xtime(x);   /* x, 2x, 4x, 8x, ... */
+    n >>= 1;
   }
   return resultado;
-}
-
-/* x2 */
-uint8_t mult2(uint8_t x) {
-  return xtime(x);
-}
-
-/* x3 = (x2) XOR x */
-uint8_t mult3(uint8_t x) {
-  return xtime(x) ^ x;
-}
-
-/* As multiplicacoes abaixo so sao usadas no InvMixColumns (decifrar).
- * Todas sao feitas so com xtime e XOR:
- *   x9  = x8 ^ x
- *   x11 = x8 ^ x2 ^ x
- *   x13 = x8 ^ x4 ^ x
- *   x14 = x8 ^ x4 ^ x2                                                       */
-uint8_t mult9(uint8_t x) {
-  uint8_t x2 = xtime(x);
-  uint8_t x4 = xtime(x2);
-  uint8_t x8 = xtime(x4);
-  return x8 ^ x;
-}
-
-uint8_t mult11(uint8_t x) {
-  uint8_t x2 = xtime(x);
-  uint8_t x4 = xtime(x2);
-  uint8_t x8 = xtime(x4);
-  return x8 ^ x2 ^ x;
-}
-
-uint8_t mult13(uint8_t x) {
-  uint8_t x2 = xtime(x);
-  uint8_t x4 = xtime(x2);
-  uint8_t x8 = xtime(x4);
-  return x8 ^ x4 ^ x;
-}
-
-uint8_t mult14(uint8_t x) {
-  uint8_t x2 = xtime(x);
-  uint8_t x4 = xtime(x2);
-  uint8_t x8 = xtime(x4);
-  return x8 ^ x4 ^ x2;
 }
 
 
@@ -189,51 +162,32 @@ uint8_t mult14(uint8_t x) {
  *   - w[i]      = w[i-1] XOR w[i-4]
  *   - quando i e multiplo de 4, antes do XOR, w[i-1] passa por:
  *       RotWord (gira 1 byte), SubWord (S-box em cada byte) e XOR com Rcon.
- * A chave da rodada r sao as palavras w[4r], w[4r+1], w[4r+2], w[4r+3].
+ * A chave da rodada r sao as palavras w[4r], w[4r+1], w[4r+2], w[4r+3]
+ * (16 bytes seguidos na memoria).
  * ========================================================================== */
-
-/* RotWord: gira a palavra 1 byte para a esquerda: [a b c d] -> [b c d a] */
-void rotWord(uint8_t palavra[4]) {
-  uint8_t primeiro = palavra[0];
-  palavra[0] = palavra[1];
-  palavra[1] = palavra[2];
-  palavra[2] = palavra[3];
-  palavra[3] = primeiro;
-}
-
-/* SubWord: passa cada um dos 4 bytes pela S-box (nao linearidade) */
-void subWord(uint8_t palavra[4]) {
-  for (int i = 0; i < 4; i++) {
-    palavra[i] = SBOX[palavra[i]];
-  }
-}
-
 void expandirChave(const uint8_t chave[16], uint8_t w[NUM_PALAVRAS][4]) {
-  /* As 4 primeiras palavras sao a propria chave */
-  for (int i = 0; i < 4; i++) {
-    for (int j = 0; j < 4; j++) {
-      w[i][j] = chave[i * 4 + j];
-    }
-  }
+  memcpy(w, chave, 16);   /* w[0..3] = a propria chave */
 
-  /* Gera as palavras w[4] ate w[43] */
   for (int i = 4; i < NUM_PALAVRAS; i++) {
-
-    /* temp = palavra anterior, w[i-1] */
     uint8_t temp[4];
-    for (int j = 0; j < 4; j++) {
-      temp[j] = w[i - 1][j];
-    }
+    memcpy(temp, w[i - 1], 4);   /* temp = w[i-1] */
 
     /* A cada 4 palavras (inicio de uma nova chave de rodada): o "tempero" */
     if (i % 4 == 0) {
-      rotWord(temp);                    /* gira 1 byte             */
-      subWord(temp);                    /* S-box em cada byte      */
-      temp[0] = temp[0] ^ RCON[i / 4 - 1];  /* XOR com Rcon (deixa cada rodada diferente) */
+      uint8_t primeiro = temp[0];          /* RotWord: [a b c d] -> [b c d a] */
+      temp[0] = temp[1];
+      temp[1] = temp[2];
+      temp[2] = temp[3];
+      temp[3] = primeiro;
+
+      for (int j = 0; j < 4; j++) {        /* SubWord: S-box em cada byte */
+        temp[j] = SBOX[temp[j]];
+      }
+
+      temp[0] ^= RCON[i / 4 - 1];          /* XOR com Rcon (deixa cada rodada diferente) */
     }
 
-    /* w[i] = w[i-4] XOR temp */
-    for (int j = 0; j < 4; j++) {
+    for (int j = 0; j < 4; j++) {          /* w[i] = w[i-4] XOR temp */
       w[i][j] = w[i - 4][j] ^ temp[j];
     }
   }
@@ -241,7 +195,7 @@ void expandirChave(const uint8_t chave[16], uint8_t w[NUM_PALAVRAS][4]) {
 
 
 /* ==========================================================================
- * AS 4 TRANSFORMACOES (cifragem)
+ * AS 4 TRANSFORMACOES E SUAS INVERSAS
  * ========================================================================== */
 
 /* AddRoundKey: XOR de cada byte do estado com a chave da rodada.
@@ -249,136 +203,55 @@ void expandirChave(const uint8_t chave[16], uint8_t w[NUM_PALAVRAS][4]) {
  * a mesma funcao serve para cifrar e decifrar.
  * A coluna c do estado faz XOR com a palavra w[4*rodada + c]. */
 void addRoundKey(uint8_t estado[4][4], uint8_t w[NUM_PALAVRAS][4], int rodada) {
-  for (int coluna = 0; coluna < 4; coluna++) {
-    for (int linha = 0; linha < 4; linha++) {
-      estado[linha][coluna] = estado[linha][coluna] ^ w[rodada * 4 + coluna][linha];
-    }
-  }
+  for (int coluna = 0; coluna < 4; coluna++)
+    for (int linha = 0; linha < 4; linha++)
+      estado[linha][coluna] ^= w[rodada * 4 + coluna][linha];
 }
 
-/* SubBytes: troca cada byte pelo valor da S-box (confusao, nao linear). */
-void subBytes(uint8_t estado[4][4]) {
-  for (int linha = 0; linha < 4; linha++) {
+/* SubBytes: troca cada byte pelo valor da tabela (confusao, nao linear).
+ * Cifrar usa a SBOX; decifrar usa a INV_SBOX. */
+void substituirBytes(uint8_t estado[4][4], const uint8_t tabela[256]) {
+  for (int linha = 0; linha < 4; linha++)
+    for (int coluna = 0; coluna < 4; coluna++)
+      estado[linha][coluna] = tabela[estado[linha][coluna]];
+}
+void subBytes(uint8_t estado[4][4])    { substituirBytes(estado, SBOX); }
+void invSubBytes(uint8_t estado[4][4]) { substituirBytes(estado, INV_SBOX); }
+
+/* ShiftRows: a linha L gira L casas para a ESQUERDA (linha 0 fica parada).
+ * Na posicao c entra o byte que estava na coluna (c + L).
+ *   linha 1: [a b c d] -> [b c d a]
+ * InvShiftRows faz o contrario: gira L casas para a DIREITA (coluna c - L). */
+void girarLinhas(uint8_t estado[4][4], int sentido) {   /* +1 esquerda, -1 direita */
+  for (int linha = 1; linha < 4; linha++) {
+    uint8_t copia[4];
+    memcpy(copia, estado[linha], 4);
     for (int coluna = 0; coluna < 4; coluna++) {
-      estado[linha][coluna] = SBOX[estado[linha][coluna]];
+      estado[linha][coluna] = copia[(coluna + sentido * linha + 4) % 4];
     }
   }
 }
-
-/* ShiftRows: gira cada linha para a ESQUERDA.
- * linha 0: nao mexe | linha 1: 1 casa | linha 2: 2 casas | linha 3: 3 casas */
-void shiftRows(uint8_t estado[4][4]) {
-  uint8_t temp;
-
-  /* Linha 0: fica parada */
-
-  /* Linha 1: gira 1 casa para a esquerda  [a b c d] -> [b c d a] */
-  temp = estado[1][0];
-  estado[1][0] = estado[1][1];
-  estado[1][1] = estado[1][2];
-  estado[1][2] = estado[1][3];
-  estado[1][3] = temp;
-
-  /* Linha 2: gira 2 casas  [a b c d] -> [c d a b]  (troca 0<->2 e 1<->3) */
-  temp = estado[2][0];
-  estado[2][0] = estado[2][2];
-  estado[2][2] = temp;
-  temp = estado[2][1];
-  estado[2][1] = estado[2][3];
-  estado[2][3] = temp;
-
-  /* Linha 3: gira 3 casas para a esquerda (= 1 casa para a direita)
-   * [a b c d] -> [d a b c] */
-  temp = estado[3][3];
-  estado[3][3] = estado[3][2];
-  estado[3][2] = estado[3][1];
-  estado[3][1] = estado[3][0];
-  estado[3][0] = temp;
-}
+void shiftRows(uint8_t estado[4][4])    { girarLinhas(estado, +1); }
+void invShiftRows(uint8_t estado[4][4]) { girarLinhas(estado, -1); }
 
 /* MixColumns: mistura os 4 bytes de cada coluna (difusao).
- * Cada coluna e multiplicada pela matriz fixa:
- *   | 02 03 01 01 |
- *   | 01 02 03 01 |
- *   | 01 01 02 03 |
- *   | 03 01 01 02 |
- * Em GF(2^8): "soma" = XOR, x1 = o proprio byte, x2 = mult2, x3 = mult3. */
-void mixColumns(uint8_t estado[4][4]) {
+ * Cada coluna e multiplicada pela matriz fixa MIX em GF(2^8)
+ * ("soma" = XOR, "vezes" = gmul). InvMixColumns usa a matriz INV_MIX.
+ * Ex.: novo byte 0 = 02*a0 ^ 03*a1 ^ 01*a2 ^ 01*a3 */
+void multiplicarColunas(uint8_t estado[4][4], const uint8_t matriz[4][4]) {
   for (int coluna = 0; coluna < 4; coluna++) {
-    /* copia a coluna antes de mexer, porque cada byte novo usa os 4 antigos */
-    uint8_t a0 = estado[0][coluna];
-    uint8_t a1 = estado[1][coluna];
-    uint8_t a2 = estado[2][coluna];
-    uint8_t a3 = estado[3][coluna];
-
-    estado[0][coluna] = mult2(a0) ^ mult3(a1) ^ a2        ^ a3;         /* 02 03 01 01 */
-    estado[1][coluna] = a0        ^ mult2(a1) ^ mult3(a2) ^ a3;         /* 01 02 03 01 */
-    estado[2][coluna] = a0        ^ a1        ^ mult2(a2) ^ mult3(a3);  /* 01 01 02 03 */
-    estado[3][coluna] = mult3(a0) ^ a1        ^ a2        ^ mult2(a3);  /* 03 01 01 02 */
-  }
-}
-
-
-/* ==========================================================================
- * AS INVERSAS (decifragem)
- * ========================================================================== */
-
-/* InvSubBytes: usa a S-box inversa. */
-void invSubBytes(uint8_t estado[4][4]) {
-  for (int linha = 0; linha < 4; linha++) {
-    for (int coluna = 0; coluna < 4; coluna++) {
-      estado[linha][coluna] = INV_SBOX[estado[linha][coluna]];
+    uint8_t a[4];   /* copia da coluna: cada byte novo usa os 4 antigos */
+    for (int linha = 0; linha < 4; linha++) {
+      a[linha] = estado[linha][coluna];
+    }
+    for (int linha = 0; linha < 4; linha++) {
+      estado[linha][coluna] = gmul(a[0], matriz[linha][0]) ^ gmul(a[1], matriz[linha][1])
+                            ^ gmul(a[2], matriz[linha][2]) ^ gmul(a[3], matriz[linha][3]);
     }
   }
 }
-
-/* InvShiftRows: gira cada linha para a DIREITA (desfaz o ShiftRows). */
-void invShiftRows(uint8_t estado[4][4]) {
-  uint8_t temp;
-
-  /* Linha 1: gira 1 casa para a direita  [a b c d] -> [d a b c] */
-  temp = estado[1][3];
-  estado[1][3] = estado[1][2];
-  estado[1][2] = estado[1][1];
-  estado[1][1] = estado[1][0];
-  estado[1][0] = temp;
-
-  /* Linha 2: gira 2 casas (igual ao ShiftRows, girar 2 para qualquer lado da no mesmo) */
-  temp = estado[2][0];
-  estado[2][0] = estado[2][2];
-  estado[2][2] = temp;
-  temp = estado[2][1];
-  estado[2][1] = estado[2][3];
-  estado[2][3] = temp;
-
-  /* Linha 3: gira 3 casas para a direita (= 1 casa para a esquerda)
-   * [a b c d] -> [b c d a] */
-  temp = estado[3][0];
-  estado[3][0] = estado[3][1];
-  estado[3][1] = estado[3][2];
-  estado[3][2] = estado[3][3];
-  estado[3][3] = temp;
-}
-
-/* InvMixColumns: mesma ideia, com a matriz inversa:
- *   | 0e 0b 0d 09 |
- *   | 09 0e 0b 0d |
- *   | 0d 09 0e 0b |
- *   | 0b 0d 09 0e |
- * (0e = 14, 0b = 11, 0d = 13, 09 = 9)                                      */
-void invMixColumns(uint8_t estado[4][4]) {
-  for (int coluna = 0; coluna < 4; coluna++) {
-    uint8_t a0 = estado[0][coluna];
-    uint8_t a1 = estado[1][coluna];
-    uint8_t a2 = estado[2][coluna];
-    uint8_t a3 = estado[3][coluna];
-
-    estado[0][coluna] = mult14(a0) ^ mult11(a1) ^ mult13(a2) ^ mult9(a3);
-    estado[1][coluna] = mult9(a0)  ^ mult14(a1) ^ mult11(a2) ^ mult13(a3);
-    estado[2][coluna] = mult13(a0) ^ mult9(a1)  ^ mult14(a2) ^ mult11(a3);
-    estado[3][coluna] = mult11(a0) ^ mult13(a1) ^ mult9(a2)  ^ mult14(a3);
-  }
-}
+void mixColumns(uint8_t estado[4][4])    { multiplicarColunas(estado, MIX); }
+void invMixColumns(uint8_t estado[4][4]) { multiplicarColunas(estado, INV_MIX); }
 
 
 /* ==========================================================================
@@ -390,21 +263,16 @@ void cifrarBloco(const uint8_t entrada[16], uint8_t saida[16], uint8_t w[NUM_PAL
   uint8_t estado[4][4];
   blocoParaEstado(entrada, estado);
 
-  /* Rodada 0: so AddRoundKey com a chave 0 (a propria chave) */
-  addRoundKey(estado, w, 0);
+  addRoundKey(estado, w, 0);              /* rodada 0: so a chave 0 */
 
-  /* Rodadas 1 a 9: as 4 transformacoes completas */
-  for (int rodada = 1; rodada <= 9; rodada++) {
+  for (int rodada = 1; rodada <= 10; rodada++) {
     subBytes(estado);
     shiftRows(estado);
-    mixColumns(estado);
+    if (rodada != 10) {                   /* a rodada final NAO tem MixColumns */
+      mixColumns(estado);
+    }
     addRoundKey(estado, w, rodada);
   }
-
-  /* Rodada 10 (final): SEM MixColumns */
-  subBytes(estado);
-  shiftRows(estado);
-  addRoundKey(estado, w, 10);
 
   estadoParaBloco(estado, saida);
 }
@@ -414,21 +282,16 @@ void decifrarBloco(const uint8_t entrada[16], uint8_t saida[16], uint8_t w[NUM_P
   uint8_t estado[4][4];
   blocoParaEstado(entrada, estado);
 
-  /* Desfaz a rodada 10 (que nao tinha MixColumns) */
-  addRoundKey(estado, w, 10);
-  invShiftRows(estado);
-  invSubBytes(estado);
+  addRoundKey(estado, w, 10);             /* desfaz o fim da rodada 10 */
 
-  /* Desfaz as rodadas 9 ate 1 */
-  for (int rodada = 9; rodada >= 1; rodada--) {
-    addRoundKey(estado, w, rodada);
-    invMixColumns(estado);
+  for (int rodada = 9; rodada >= 0; rodada--) {
     invShiftRows(estado);
     invSubBytes(estado);
+    addRoundKey(estado, w, rodada);
+    if (rodada != 0) {                    /* a chave 0 nao veio depois de um MixColumns */
+      invMixColumns(estado);
+    }
   }
-
-  /* Desfaz a rodada 0 */
-  addRoundKey(estado, w, 0);
 
   estadoParaBloco(estado, saida);
 }
@@ -443,18 +306,9 @@ void decifrarBloco(const uint8_t entrada[16], uint8_t saida[16], uint8_t w[NUM_P
  * (assim o receptor SEMPRE sabe quanto remover).
  * Retorna o tamanho final (multiplo de 16).                                 */
 int adicionarPadding(const uint8_t *mensagem, int tamanho, uint8_t *saida) {
-  int falta = 16 - (tamanho % 16);      /* sempre da entre 1 e 16 */
-
-  /* copia a mensagem */
-  for (int i = 0; i < tamanho; i++) {
-    saida[i] = mensagem[i];
-  }
-
-  /* completa com 'falta' bytes, todos com o valor 'falta' */
-  for (int i = 0; i < falta; i++) {
-    saida[tamanho + i] = falta;
-  }
-
+  int falta = 16 - (tamanho % 16);        /* sempre da entre 1 e 16 */
+  memcpy(saida, mensagem, tamanho);
+  memset(saida + tamanho, falta, falta);  /* 'falta' bytes com o valor 'falta' */
   return tamanho + falta;
 }
 
@@ -465,35 +319,30 @@ int removerPadding(const uint8_t *dados, int tamanho) {
     return -1;
   }
 
-  /* o ultimo byte diz quantos bytes de padding existem */
-  int padding = dados[tamanho - 1];
+  int padding = dados[tamanho - 1];       /* o ultimo byte diz quantos sao */
   if (padding < 1 || padding > 16) {
     return -1;
   }
 
-  /* todos os bytes de padding tem que ter o mesmo valor */
-  for (int i = 1; i <= padding; i++) {
+  for (int i = 1; i <= padding; i++) {    /* todos tem que ter o mesmo valor */
     if (dados[tamanho - i] != padding) {
       return -1;
     }
   }
-
   return tamanho - padding;
 }
 
 /* ECB: cifra cada bloco de 16 bytes de forma independente, com a mesma chave.
  * (Por isso blocos iguais geram cifrados iguais - o problema do ECB.)       */
 void cifrarECB(const uint8_t *entrada, uint8_t *saida, int tamanho, uint8_t w[NUM_PALAVRAS][4]) {
-  int numBlocos = tamanho / 16;
-  for (int b = 0; b < numBlocos; b++) {
-    cifrarBloco(&entrada[b * 16], &saida[b * 16], w);
+  for (int i = 0; i < tamanho; i += 16) {
+    cifrarBloco(&entrada[i], &saida[i], w);
   }
 }
 
 void decifrarECB(const uint8_t *entrada, uint8_t *saida, int tamanho, uint8_t w[NUM_PALAVRAS][4]) {
-  int numBlocos = tamanho / 16;
-  for (int b = 0; b < numBlocos; b++) {
-    decifrarBloco(&entrada[b * 16], &saida[b * 16], w);
+  for (int i = 0; i < tamanho; i += 16) {
+    decifrarBloco(&entrada[i], &saida[i], w);
   }
 }
 
@@ -506,15 +355,9 @@ void decifrarECB(const uint8_t *entrada, uint8_t *saida, int tamanho, uint8_t w[
  * Ex.: "20231001" + "20231002" -> 32 30 32 33 31 30 30 31 32 30 32 33 ...
  * (a matricula deve ser escrita so com numeros)                              */
 void pegarUltimos8(const char *matricula, uint8_t saida[8]) {
-  int tamanho = strlen(matricula);
-
+  int falta = 8 - (int)strlen(matricula); /* > 0: matricula curta; < 0: longa */
   for (int i = 0; i < 8; i++) {
-    int posicao = tamanho - 8 + i;      /* posicao dentro dos ultimos 8 */
-    if (posicao >= 0) {
-      saida[i] = matricula[posicao];
-    } else {
-      saida[i] = '0';                   /* matricula curta: completa com '0' */
-    }
+    saida[i] = (i < falta) ? '0' : matricula[i - falta];
   }
 }
 
@@ -523,16 +366,43 @@ void montarChave(const char *matriculaA, const char *matriculaB, uint8_t chave[1
   pegarUltimos8(matriculaB, &chave[8]);   /* bytes 8 a 15 */
 }
 
-/* Conta quantos bits sao diferentes entre dois vetores (efeito avalanche). */
+
+/* ==========================================================================
+ * VALIDACAO (FIPS-197, Apendices B e C.1) E AVALANCHE
+ * ========================================================================== */
+
+/* Cifra e decifra os vetores oficiais. Retorna 1 se tudo bateu. */
+int validarFIPS197() {
+  /* { chave, texto claro, cifrado esperado } */
+  const uint8_t vetores[2][3][16] = {
+    { /* Apendice B */
+      {0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c},
+      {0x32,0x43,0xf6,0xa8,0x88,0x5a,0x30,0x8d,0x31,0x31,0x98,0xa2,0xe0,0x37,0x07,0x34},
+      {0x39,0x25,0x84,0x1d,0x02,0xdc,0x09,0xfb,0xdc,0x11,0x85,0x97,0x19,0x6a,0x0b,0x32} },
+    { /* Apendice C.1 */
+      {0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f},
+      {0x00,0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x88,0x99,0xaa,0xbb,0xcc,0xdd,0xee,0xff},
+      {0x69,0xc4,0xe0,0xd8,0x6a,0x7b,0x04,0x30,0xd8,0xcd,0xb7,0x80,0x70,0xb4,0xc5,0x5a} }
+  };
+
+  for (int t = 0; t < 2; t++) {
+    uint8_t w[NUM_PALAVRAS][4], cifrado[16], decifrado[16];
+    expandirChave(vetores[t][0], w);
+    cifrarBloco(vetores[t][1], cifrado, w);
+    decifrarBloco(cifrado, decifrado, w);
+    if (memcmp(cifrado, vetores[t][2], 16) != 0 || memcmp(decifrado, vetores[t][1], 16) != 0) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+/* Conta quantos bits sao diferentes entre dois vetores (efeito avalanche).
+ * O XOR deixa 1 onde os bits diferem; popcount conta esses 1. */
 int contarBitsDiferentes(const uint8_t *a, const uint8_t *b, int tamanho) {
   int total = 0;
   for (int i = 0; i < tamanho; i++) {
-    uint8_t diferenca = a[i] ^ b[i];    /* fica 1 onde os bits sao diferentes */
-    for (int bit = 0; bit < 8; bit++) {
-      if (diferenca & (1 << bit)) {
-        total++;
-      }
-    }
+    total += __builtin_popcount(a[i] ^ b[i]);
   }
   return total;
 }

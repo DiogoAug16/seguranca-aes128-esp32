@@ -66,6 +66,8 @@ int main(void) {
             "3243f6a8885a308d313198a2e0370734", "3925841d02dc09fbdc118597196a0b32");
   testeFips("Apendice C.1", "000102030405060708090a0b0c0d0e0f",
             "00112233445566778899aabbccddeeff", "69c4e0d86a7b0430d8cdb78070b4c55a");
+  if (!validarFIPS197()) falhas++;
+  printf("[%s] validarFIPS197 (usada nas placas)\n", validarFIPS197() ? " OK " : "FALHOU");
 
   /* rodada 1 do Apendice B (valores dos slides), passo a passo */
   {
