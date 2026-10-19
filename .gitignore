@@ -1,0 +1,8 @@
+# executaveis do teste no PC
+*.exe
+*.o
+teste_pc/teste
+
+# arquivos do VS Code / Arduino
+.vscode/
+build/
