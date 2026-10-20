@@ -1,6 +1,7 @@
 /* Teste no PC do aes128.h (o mesmo arquivo usado nos ESP32).
  * Compilar:  gcc -I../transmissor teste.c -o teste && ./teste
- * Confere com FIPS-197 (Apendices B e C.1) e com os valores do enunciado. */
+ * Confere com FIPS-197 (Apendices B e C.1) e com os valores do enunciado,
+ * e mostra que a S-box, o Rcon e as matrizes do MixColumns vem das contas do padrao. */
 #include <stdio.h>
 #include "aes128.h"
 
@@ -43,6 +44,31 @@ void chaveDaRodada(uint8_t w[NUM_PALAVRAS][4], int r, uint8_t saida[16]) {
   for (int i = 0; i < 4; i++)
     for (int j = 0; j < 4; j++)
       saida[i * 4 + j] = w[r * 4 + i][j];
+}
+
+/* marca o resultado de uma conferencia que nao compara bytes */
+void verifica(const char *nome, int ok) {
+  printf("[%s] %s\n", ok ? " OK " : "FALHOU", nome);
+  if (!ok) falhas++;
+}
+
+/* inverso de x no GF(2^8): o y tal que x * y = 1 (o 0 nao tem inverso e fica 0) */
+uint8_t inversoGF(uint8_t x) {
+  for (int y = 1; y < 256; y++)
+    if (gmul(x, y) == 1) return y;
+  return 0;
+}
+
+/* transformacao afim da S-box (FIPS-197, secao 5.1.1):
+ * bit i = b[i] ^ b[i+4] ^ b[i+5] ^ b[i+6] ^ b[i+7] ^ (bit i de 0x63), indices mod 8 */
+uint8_t afim(uint8_t b) {
+  uint8_t r = 0;
+  for (int i = 0; i < 8; i++) {
+    int bit = (b >> i) ^ (b >> ((i + 4) % 8)) ^ (b >> ((i + 5) % 8))
+            ^ (b >> ((i + 6) % 8)) ^ (b >> ((i + 7) % 8)) ^ (0x63 >> i);
+    r |= (bit & 1) << i;
+  }
+  return r;
 }
 
 void testeFips(const char *nome, const char *k, const char *p, const char *c) {
@@ -162,6 +188,35 @@ int main(void) {
     msg2[0] ^= 0x01;
     cifrarBloco(msg2, outro, w);
     printf("Avalanche (1 bit da msg):   %d de 128 bits mudaram\n", contarBitsDiferentes(cifrado, outro, 16));
+  }
+
+  /* as tabelas fixas do aes128.h vem das contas do padrao */
+  printf("\n== Origem das constantes ==\n");
+  {
+    int sboxOk = 1, invOk = 1;
+    for (int x = 0; x < 256; x++) {
+      if (afim(inversoGF(x)) != SBOX[x]) sboxOk = 0;
+      if (INV_SBOX[SBOX[x]] != x) invOk = 0;
+    }
+    verifica("S-box = inverso em GF(2^8) + transformacao afim", sboxOk);
+    verifica("S-box inversa desfaz a S-box", invOk);
+
+    int rconOk = 1;
+    uint8_t r = 0x01;
+    for (int i = 0; i < 10; i++) {
+      if (RCON[i] != r) rconOk = 0;
+      r = xtime(r);
+    }
+    verifica("Rcon = 01 dobrado com xtime", rconOk);
+
+    int mixOk = 1;
+    for (int i = 0; i < 4; i++)
+      for (int j = 0; j < 4; j++) {
+        uint8_t soma = 0;
+        for (int k = 0; k < 4; k++) soma ^= gmul(MIX[i][k], INV_MIX[k][j]);
+        if (soma != (i == j)) mixOk = 0;
+      }
+    verifica("MIX x INV_MIX = identidade", mixOk);
   }
 
   printf("\n%s\n", falhas ? "HOUVE FALHAS" : "TUDO CERTO");

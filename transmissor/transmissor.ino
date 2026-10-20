@@ -72,6 +72,28 @@ void imprimirEstado(const char *titulo, uint8_t estado[4][4]) {
 
 
 /* =========================================================================
+ * ETAPA 1: VALIDACAO COM OS VETORES DO FIPS-197
+ * ========================================================================= */
+void etapa1() {
+  const char *nomes[2] = {"Apendice B", "Apendice C.1"};
+
+  Serial.println("=== ETAPA 1: validacao com FIPS-197 ===");
+  for (int t = 0; t < 2; t++) {
+    uint8_t cifrado[16];
+    int ok = testarFIPS197(t, cifrado);
+
+    Serial.println(nomes[t]);
+    imprimirHex("  Chave:            ", FIPS197[t][0], 16);
+    imprimirHex("  Texto claro:      ", FIPS197[t][1], 16);
+    imprimirHex("  Cifrado esperado: ", FIPS197[t][2], 16);
+    imprimirHex("  Cifrado obtido:   ", cifrado, 16);
+    Serial.printf("  Resultado:        %s\n", ok ? "OK" : "FALHOU");
+  }
+  Serial.println();
+}
+
+
+/* =========================================================================
  * ETAPA 2: CIFRAR E ENVIAR PELA UART
  * ========================================================================= */
 void cifrarEEnviar(const char *mensagem) {
@@ -227,12 +249,11 @@ void trocarChave() {
 
 void setup() {
   Serial.begin(VELOCIDADE);                                    /* Monitor Serial */
-  Serial2.begin(VELOCIDADE, SERIAL_8N1, PINO_RX2, PINO_TX2);   /* fio ate a placa B */
+  Serial2.begin(VELOCIDADE, SERIAL_8N1, PINO_RX2, PINO_TX2);   /* UART ligada a placa B */
   delay(1500);
 
   Serial.println("\n##### PLACA A - TRANSMISSOR AES-128 #####\n");
-  Serial.printf("=== ETAPA 1: FIPS-197 (Apendices B e C.1): %s ===\n\n",
-                validarFIPS197() ? "OK" : "FALHOU");
+  etapa1();
 
   montarChave(MATRICULA_A, MATRICULA_B, chave);
   expandirChave(chave, w);

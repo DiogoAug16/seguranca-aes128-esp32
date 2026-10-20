@@ -70,7 +70,7 @@ Enviado em bytes brutos (`Serial2.write`), não em texto hexadecimal.
 | PKCS#7 | `adicionarPadding` / `removerPadding` |
 | ECB | `cifrarECB` / `decifrarECB` |
 | Chave das matrículas | `montarChave` |
-| Validação FIPS-197 (nas duas placas) | `validarFIPS197` |
+| Validação FIPS-197 (nas duas placas) | `testarFIPS197` / `validarFIPS197` |
 
 A S-box e a S-box inversa foram tiradas do FIPS-197 (NIST), Tabelas 4 e 6:
 https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf
@@ -83,4 +83,6 @@ gcc -I../transmissor teste.c -o teste && ./teste
 ```
 
 Confere os vetores do FIPS-197 (Apêndices B e C.1), os 5 estados da rodada 1,
-o exemplo do enunciado e os 3 blocos da demonstração do ECB.
+o exemplo do enunciado e os 3 blocos da demonstração do ECB. Também confere a origem das
+tabelas fixas: a S-box (inverso em GF(2⁸) + transformação afim), o Rcon (`xtime` a partir de `01`)
+e as matrizes do MixColumns (`MIX` × `INV_MIX` = identidade).
